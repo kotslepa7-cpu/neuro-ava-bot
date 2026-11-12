@@ -1,12 +1,13 @@
+import os
 import asyncio
 import sqlite3
 import urllib.parse
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-# Вставь сюда токен своего бота от @BotFather
-BOT_TOKEN = "9050576973:AAFNdWmA5GKYl2YV1tgZJl9NSTT2HmTHlow"
+BOT_TOKEN = "9050576973:AAFNdWmA5GKYl2YV1tgZJl9NSTT2HmTHlow"  # Замени на полный токен, если обрезался
 
 # Настройки монетизации
 FREE_GENERATIONS = 3      # Бесплатно при старте
@@ -16,7 +17,7 @@ PACK_GENERATIONS = 15     # Сколько генераций даем за по
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- Работа с базой данных (SQLite) ---
+# --- База данных ---
 conn = sqlite3.connect("users.db")
 cursor = conn.cursor()
 cursor.execute("""
@@ -41,7 +42,6 @@ def update_balance(user_id: int, amount: int):
     cursor.execute("UPDATE users SET balance = ? WHERE user_id = ?", (current + amount, user_id))
     conn.commit()
 
-# --- Клавиатура покупки ---
 def buy_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
@@ -50,7 +50,6 @@ def buy_keyboard():
         )]
     ])
 
-# --- Команды и сообщения ---
 @dp.message(CommandStart())
 async def start_command(message: types.Message):
     balance = get_balance(message.from_user.id)
@@ -69,16 +68,14 @@ async def send_stars_invoice(callback: types.CallbackQuery):
         title=f"Пакет на {PACK_GENERATIONS} аватарок",
         description=f"Пополнение баланса в боте NeuroAva на {PACK_GENERATIONS} генераций.",
         payload="pack_15",
-        currency="XTR",  # Валюта Telegram Stars
+        currency="XTR",
         prices=[LabeledPrice(label=f"{PACK_GENERATIONS} генераций", amount=STARS_PRICE)]
     )
 
-# Обязательное подтверждение перед оплатой
 @dp.pre_checkout_query()
 async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
 
-# Начисление генераций после успешной оплаты
 @dp.message(F.successful_payment)
 async def successful_payment_handler(message: types.Message):
     user_id = message.from_user.id
@@ -91,7 +88,6 @@ async def successful_payment_handler(message: types.Message):
         parse_mode="Markdown"
     )
 
-# Генерация картинки
 @dp.message()
 async def generate_image(message: types.Message):
     prompt = message.text
@@ -126,8 +122,22 @@ async def generate_image(message: types.Message):
     except Exception:
         await wait_msg.edit_text("Ошибка при генерации. Попытка не списана, попробуй другой запрос.")
 
+# --- Мини-сервер для бесплатного хостинга Render ---
+async def handle_ping(request):
+    return web.Response(text="Bot is alive!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
 async def main():
-    print("Бот NeuroAva со звездами запущен!")
+    await start_web_server()
+    print("Бот NeuroAva запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
