@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 
-BOT_TOKEN = "9050576973:AAFNdWmA5GKYl2YV1tgZJl9NSTT2HmTHlow" # Вставь свой полный токен от @BotFather, если обрезан
+BOT_TOKEN = "9050576973:AAFNdWmA5GKYl2YV1tgZJl9NSTT2HmTHlow"
 
 FREE_GENERATIONS = 3
 STARS_PRICE = 25
@@ -30,7 +30,7 @@ def get_balance(user_id: int) -> int:
         cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, FREE_GENERATIONS))
         conn.commit()
         return FREE_GENERATIONS
-    return int(row[0])
+    return int(row)
 
 def update_balance(user_id: int, amount: int):
     current = get_balance(user_id)
@@ -75,6 +75,15 @@ async def successful_payment_handler(message: types.Message):
     new_balance = get_balance(user_id)
     await message.answer(f"✅ Оплата прошла успешно! Текущий баланс: **{new_balance}**.", parse_mode="Markdown")
 
+async def translate_to_english(session: aiohttp.ClientSession, text: str) -> str:
+    try:
+        url = f"https://googleapis.com{urllib.parse.quote(text)}"
+        async with session.get(url, timeout=10) as r:
+            data = await r.json()
+            return "".join(part for part in data)
+    except Exception:
+        return text
+
 @dp.message()
 async def generate_image(message: types.Message):
     if not message.text:
@@ -90,14 +99,16 @@ async def generate_image(message: types.Message):
 
     wait_msg = await message.answer("🎨 Рисую твою аватарку, подожди 5–10 секунд...")
 
-    encoded_prompt = urllib.parse.quote(message.text)
-    seed = random.randint(1, 999999)
-    image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&seed={seed}&nologo=true"
-
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(image_url, timeout=60) as resp:
+            # Переводим запрос на английский, чтобы ссылка была короткой и нейросеть лучше понимала
+            en_prompt = await translate_to_english(session, message.text)
+            encoded_prompt = urllib.parse.quote(en_prompt)
+            seed = random.randint(1, 999999)
+            image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&seed={seed}&nologo=true"
+
+            async with session.get(image_url, timeout=60, allow_redirects=True) as resp:
                 if resp.status != 200:
                     raise Exception(f"HTTP {resp.status}")
                 image_bytes = await resp.read()
@@ -131,4 +142,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
