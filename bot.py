@@ -1,13 +1,16 @@
 import os
+import random
 import asyncio
 import sqlite3
 import urllib.parse
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
-from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 
-BOT_TOKEN = "9050576973:AAFNdWmA5GKYl2YV1tgZJl9NSTT2HmTHlow"  # Замени на полный токен, если обрезался
+# Вставь сюда свой полный токен от @BotFather
+BOT_TOKEN = "9050576973:AAFNdWmA5GKYl2YV1tgZJl9NSTT2HmTHlow"
 
 # Настройки монетизации
 FREE_GENERATIONS = 3      # Бесплатно при старте
@@ -35,7 +38,7 @@ def get_balance(user_id: int) -> int:
         cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, FREE_GENERATIONS))
         conn.commit()
         return FREE_GENERATIONS
-    return row[0]
+    return row
 
 def update_balance(user_id: int, amount: int):
     current = get_balance(user_id)
@@ -106,21 +109,32 @@ async def generate_image(message: types.Message):
         )
         return
 
-    wait_msg = await message.answer("🎨 Рисую твою аватарку, подожди пару секунд...")
+    wait_msg = await message.answer("🎨 Рисую твою аватарку, подожди 5–10 секунд...")
 
     encoded_prompt = urllib.parse.quote(prompt)
-    image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true"
+    seed = random.randint(1, 999999)
+    image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&seed={seed}&nologo=true"
 
     try:
+        # Скачиваем картинку напрямую на сервер с запасом времени
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url, timeout=60) as resp:
+                if resp.status != 200:
+                    raise Exception(f"HTTP {resp.status}")
+                image_bytes = await resp.read()
+
+        photo_file = BufferedInputFile(image_bytes, filename="avatar.jpg")
+
         await message.answer_photo(
-            photo=image_url,
+            photo=photo_file,
             caption=f"✨ Готово! Запрос: *{prompt}*\nОсталось генераций: **{balance - 1}**",
             parse_mode="Markdown"
         )
         update_balance(user_id, -1)
         await wait_msg.delete()
-    except Exception:
-        await wait_msg.edit_text("Ошибка при генерации. Попытка не списана, попробуй другой запрос.")
+    except Exception as e:
+        print(f"Ошибка генерации: {e}")
+        await wait_msg.edit_text("Ошибка при генерации. Попытка не списана, попробуй еще раз через пару секунд.")
 
 # --- Мини-сервер для бесплатного хостинга Render ---
 async def handle_ping(request):
@@ -142,4 +156,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
