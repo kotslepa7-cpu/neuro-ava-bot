@@ -9,26 +9,18 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 
-# Вставь сюда свой полный токен от @BotFather
-BOT_TOKEN = "9050576973:AAFNdWmA5GKYl2YV1tgZJl9NSTT2HmTHlow"
+BOT_TOKEN = "9050576973:AAFNdWmA5GKYl2YV1tgZJl9NSTT2HmTHlow" # Вставь свой полный токен от @BotFather, если обрезан
 
-# Настройки монетизации
-FREE_GENERATIONS = 3      # Бесплатно при старте
-STARS_PRICE = 25          # Цена в звездах (XTR)
-PACK_GENERATIONS = 15     # Сколько генераций даем за покупку
+FREE_GENERATIONS = 3
+STARS_PRICE = 25
+PACK_GENERATIONS = 15
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- База данных ---
 conn = sqlite3.connect("users.db")
 cursor = conn.cursor()
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        balance INTEGER
-    )
-""")
+cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, balance INTEGER)")
 conn.commit()
 
 def get_balance(user_id: int) -> int:
@@ -38,7 +30,7 @@ def get_balance(user_id: int) -> int:
         cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, FREE_GENERATIONS))
         conn.commit()
         return FREE_GENERATIONS
-    return row
+    return int(row[0])
 
 def update_balance(user_id: int, amount: int):
     current = get_balance(user_id)
@@ -47,10 +39,7 @@ def update_balance(user_id: int, amount: int):
 
 def buy_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"⭐ Купить {PACK_GENERATIONS} генераций за {STARS_PRICE} Звезд",
-            callback_data="buy_pack"
-        )]
+        [InlineKeyboardButton(text=f"⭐ Купить {PACK_GENERATIONS} генераций за {STARS_PRICE} Звезд", callback_data="buy_pack")]
     ])
 
 @dp.message(CommandStart())
@@ -59,7 +48,7 @@ async def start_command(message: types.Message):
     await message.answer(
         f"Привет! Я **NeuroAva** — бот для генерации картинок и аватарок.\n\n"
         f"🎁 Твой баланс: **{balance} генераций**.\n"
-        f"Просто напиши мне, что нарисовать (например: *киберпанк кот в очках, неоновый свет*).",
+        f"Просто напиши мне, что нарисовать (например: *киберпанк кот в очках*).",
         parse_mode="Markdown",
         reply_markup=buy_keyboard()
     )
@@ -84,17 +73,11 @@ async def successful_payment_handler(message: types.Message):
     user_id = message.from_user.id
     update_balance(user_id, PACK_GENERATIONS)
     new_balance = get_balance(user_id)
-    await message.answer(
-        f"✅ Оплата прошла успешно!\n"
-        f"Начислено **{PACK_GENERATIONS} генераций**.\n"
-        f"Твой текущий баланс: **{new_balance}**.",
-        parse_mode="Markdown"
-    )
+    await message.answer(f"✅ Оплата прошла успешно! Текущий баланс: **{new_balance}**.", parse_mode="Markdown")
 
 @dp.message()
 async def generate_image(message: types.Message):
-    prompt = message.text
-    if not prompt:
+    if not message.text:
         await message.answer("Отправь текстовое описание картинки.")
         return
 
@@ -102,41 +85,34 @@ async def generate_image(message: types.Message):
     balance = get_balance(user_id)
 
     if balance <= 0:
-        await message.answer(
-            "😔 У тебя закончились бесплатные генерации.\n"
-            "Пополни баланс, чтобы продолжить создавать аватарки!",
-            reply_markup=buy_keyboard()
-        )
+        await message.answer("😔 Бесплатные генерации закончились. Пополни баланс!", reply_markup=buy_keyboard())
         return
 
     wait_msg = await message.answer("🎨 Рисую твою аватарку, подожди 5–10 секунд...")
 
-    encoded_prompt = urllib.parse.quote(prompt)
+    encoded_prompt = urllib.parse.quote(message.text)
     seed = random.randint(1, 999999)
     image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&seed={seed}&nologo=true"
 
     try:
-        # Скачиваем картинку напрямую на сервер с запасом времени
-        async with aiohttp.ClientSession() as session:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(image_url, timeout=60) as resp:
                 if resp.status != 200:
                     raise Exception(f"HTTP {resp.status}")
                 image_bytes = await resp.read()
 
         photo_file = BufferedInputFile(image_bytes, filename="avatar.jpg")
-
         await message.answer_photo(
             photo=photo_file,
-            caption=f"✨ Готово! Запрос: *{prompt}*\nОсталось генераций: **{balance - 1}**",
+            caption=f"✨ Готово! Запрос: *{message.text}*\nОсталось генераций: **{balance - 1}**",
             parse_mode="Markdown"
         )
         update_balance(user_id, -1)
         await wait_msg.delete()
     except Exception as e:
-        print(f"Ошибка генерации: {e}")
-        await wait_msg.edit_text("Ошибка при генерации. Попытка не списана, попробуй еще раз через пару секунд.")
+        await wait_msg.edit_text(f"Ошибка нейросети ({e}). Попробуй еще раз через пару секунд.")
 
-# --- Мини-сервер для бесплатного хостинга Render ---
 async def handle_ping(request):
     return web.Response(text="Bot is alive!")
 
@@ -151,8 +127,8 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    print("Бот NeuroAva запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
